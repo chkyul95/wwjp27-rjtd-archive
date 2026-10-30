@@ -1,0 +1,59 @@
+name: Archive & Save WWJP27 RJTD
+
+on:
+  schedule:
+    - cron: '30 1,4,7,10,13,16,19,22 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  archive-and-download:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Download file and check for updates
+        id: check_update
+        run: |
+          TARGET_URL="https://tgftp.nws.noaa.gov/data/raw/ww/wwjp27.rjtd..txt"
+          
+          mkdir -p data
+          TEMP_FILE="data/temp_download.txt"
+          
+          curl -fsSL "$TARGET_URL" -o "$TEMP_FILE"
+          
+          if [ -f "data/latest.txt" ] && cmp -s "$TEMP_FILE" "data/latest.txt"; then
+            echo "No changes in NOAA data. Skipping save."
+            rm -f "$TEMP_FILE"
+            echo "has_update=false" >> $GITHUB_OUTPUT
+          else
+            YEAR=$(date -u +'%Y')
+            MONTH=$(date -u +'%m')
+            TIMESTAMP=$(date -u +'%Y%m%d_%H%M%S')
+            
+            TARGET_DIR="data/${YEAR}/${MONTH}"
+            mkdir -p "$TARGET_DIR"
+            
+            FILE_PATH="${TARGET_DIR}/wwjp27_${TIMESTAMP}.txt"
+            mv "$TEMP_FILE" "$FILE_PATH"
+            cp "$FILE_PATH" data/latest.txt
+            
+            curl -s -I "https://web.archive.org/save/${TARGET_URL}" > /dev/null || true
+            
+            echo "has_update=true" >> $GITHUB_OUTPUT
+            echo "Saved to $FILE_PATH and latest.txt"
+          fi
+
+      - name: Commit and Push changes
+        if: steps.check_update.outputs.has_update == 'true'
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          
+          git add data/
+          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          git commit -m "Update WWJP27 RJTD data: ${TIMESTAMP}"
+          git push
